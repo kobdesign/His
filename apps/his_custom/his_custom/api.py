@@ -277,6 +277,7 @@ LINK_SOURCES = {
 	"lab_test": ("Lab Prescription", "lab_test_code"),
 	"warehouse": ("Pharmacy Dispense", "warehouse"),
 	"item": ("Pharmacy Dispense Item", "item_code"),
+	"mode_of_payment": ("Payment Entry", "mode_of_payment"),
 }
 
 
@@ -762,3 +763,315 @@ def submit_dispense(encounter: str, items, warehouse: str | None = None, update_
 	doc.submit()
 
 	return {"name": doc.name, "stock_entry": doc.stock_entry}
+
+
+# ------------------------------------------------------------------
+# การเงิน (Billing / Payment)
+# ------------------------------------------------------------------
+
+
+def _price_hint(item_code: str | None) -> float | None:
+	"""ราคาโดยประมาณจาก Item Price (แสดงในจอเท่านั้น — ราคาจริง ERPNext คิดตอนออกใบแจ้งหนี้)"""
+	if not item_code:
+		return None
+	price_list = frappe.db.get_single_value("Selling Settings", "selling_price_list")
+	filters: dict = {"item_code": item_code, "selling": 1}
+	if price_list:
+		rate = frappe.db.get_value("Item Price", {**filters, "price_list": price_list}, "price_list_rate")
+		if rate is not None:
+			return rate
+	return frappe.db.get_value("Item Price", filters, "price_list_rate")
+
+
+def _invoice_summary(name: str) -> dict:
+	si = frappe.get_doc("Sales Invoice", name)
+	return {
+		"name": si.name,
+		"status": si.status,
+		"grand_total": si.grand_total,
+		"outstanding_amount": si.outstanding_amount,
+		"posting_date": str(si.posting_date) if si.posting_date else None,
+		"items": [
+			{
+				"item_code": r.item_code,
+				"item_name": r.item_name,
+				"qty": r.qty,
+				"rate": r.rate,
+				"amount": r.amount,
+			}
+			for r in si.items
+		],
+	}
+
+
+def _find_encounter_invoice(encounter: str) -> str | None:
+	if not frappe.get_meta("Sales Invoice").has_field("his_encounter"):
+		return None
+	return frappe.db.get_value(
+		"Sales Invoice", {"his_encounter": encounter, "docstatus": 1}, "name"
+	)
+
+
+@frappe.whitelist()
+def get_billing_queue(date: str | None = None):
+	"""คิวการเงิน — encounter ที่จบการตรวจของวัน พร้อมสถานะใบแจ้งหนี้/การชำระ"""
+	date = date or nowdate()
+
+	enc_meta = frappe.get_meta("Patient Encounter")
+	fields = ["name", "patient", "patient_name", "encounter_date", "encounter_time"]
+	for optional in ("practitioner_name", "medical_department"):
+		if enc_meta.has_field(optional):
+			fields.append(optional)
+
+	encounters = frappe.get_list(
+		"Patient Encounter",
+		filters={"encounter_date": date, "docstatus": 1},
+		fields=fields,
+		order_by="encounter_time asc",
+		limit_page_length=0,
+	)
+
+	billing_ready = frappe.get_meta("Sales Invoice").has_field("his_encounter")
+	invoices: dict = {}
+	names = [e.name for e in encounters]
+	if names and billing_ready:
+		for inv in frappe.get_all(
+			"Sales Invoice",
+			filters={"his_encounter": ["in", names], "docstatus": 1},
+			fields=["name", "his_encounter", "grand_total", "outstanding_amount", "status"],
+		):
+			invoices[inv.his_encounter] = {
+				"name": inv.name,
+				"grand_total": inv.grand_total,
+				"outstanding_amount": inv.outstanding_amount,
+				"status": inv.status,
+			}
+
+	for e in encounters:
+		e["invoice"] = invoices.get(e.name)
+
+	return {"date": str(date), "encounters": encounters, "billing_ready": billing_ready}
+
+
+@frappe.whitelist()
+def get_billing_context(encounter: str):
+	"""ข้อมูลหน้าเก็บเงิน: ผู้ป่วย + รายการค่าใช้จ่ายที่รวบรวมได้ + ใบแจ้งหนี้เดิม (ถ้ามี)"""
+	doc = frappe.get_doc("Patient Encounter", encounter)
+	doc.check_permission("read")
+	if doc.docstatus != 1:
+		frappe.throw(_("Encounter {0} ยังไม่จบการตรวจ").format(encounter))
+
+	patient = frappe.get_doc("Patient", doc.patient)
+	charges: list[dict] = []
+
+	# --- ค่าตรวจแพทย์ (จาก Healthcare Practitioner) ---
+	if doc.get("practitioner"):
+		prac = frappe.get_doc("Healthcare Practitioner", doc.practitioner)
+		item = prac.get("op_consulting_charge_item")
+		if item:
+			charge = prac.get("op_consulting_charge")
+			charges.append(
+				{
+					"source": "ค่าตรวจแพทย์",
+					"item_code": item,
+					"item_name": frappe.db.get_value("Item", item, "item_name"),
+					"qty": 1,
+					"rate_hint": charge if charge else _price_hint(item),
+				}
+			)
+
+	# --- ค่ายา: ใช้ของที่จ่ายจริงจาก Pharmacy Dispense ก่อน ไม่มีจึงถอยไปใบสั่งยา ---
+	dispense_names = frappe.get_all(
+		"Pharmacy Dispense",
+		filters={"encounter": encounter, "docstatus": 1},
+		pluck="name",
+		limit=1,
+	)
+	if dispense_names:
+		disp = frappe.get_doc("Pharmacy Dispense", dispense_names[0])
+		for row in disp.items:
+			if row.item_code:
+				charges.append(
+					{
+						"source": "ยา (จ่ายแล้ว)",
+						"item_code": row.item_code,
+						"item_name": row.item_name,
+						"qty": row.qty,
+						"rate_hint": _price_hint(row.item_code),
+					}
+				)
+	elif doc.meta.has_field("drug_prescription"):
+		for row in doc.get("drug_prescription"):
+			resolved = _resolve_drug_item(row.get("drug_code") or row.get("medication"))
+			if resolved:
+				charges.append(
+					{
+						"source": "ยา (ตามใบสั่ง)",
+						"item_code": resolved["item_code"],
+						"item_name": resolved["item_name"],
+						"qty": 1,
+						"rate_hint": _price_hint(resolved["item_code"]),
+					}
+				)
+
+	# --- ค่าแล็บ (จาก Lab Test Template.item) ---
+	if doc.meta.has_field("lab_test_prescription"):
+		link_field, target = _link_target(
+			doc.meta.get_field("lab_test_prescription").options, "lab_test_code"
+		)
+		template_meta = frappe.get_meta(target) if target else None
+		for row in doc.get("lab_test_prescription"):
+			template = row.get(link_field) if link_field else None
+			if not template or not template_meta or not template_meta.has_field("item"):
+				continue
+			values = frappe.db.get_value(
+				target,
+				template,
+				["item"] + (["lab_test_rate"] if template_meta.has_field("lab_test_rate") else []),
+				as_dict=True,
+			)
+			if values and values.item:
+				charges.append(
+					{
+						"source": "แล็บ",
+						"item_code": values.item,
+						"item_name": frappe.db.get_value("Item", values.item, "item_name"),
+						"qty": 1,
+						"rate_hint": values.get("lab_test_rate") or _price_hint(values.item),
+					}
+				)
+
+	invoice_name = _find_encounter_invoice(encounter)
+
+	return {
+		"encounter": {
+			"name": doc.name,
+			"encounter_date": str(doc.encounter_date) if doc.encounter_date else None,
+			"encounter_time": str(doc.encounter_time) if doc.encounter_time else None,
+			"practitioner_name": doc.get("practitioner_name"),
+		},
+		"patient": {
+			"name": patient.name,
+			"patient_name": patient.patient_name,
+			"sex": patient.sex,
+			"age": _age_text(patient.dob),
+			"mobile": patient.mobile,
+			"customer_ok": bool(patient.get("customer")),
+		},
+		"charges": charges,
+		"invoice": _invoice_summary(invoice_name) if invoice_name else None,
+		"billing_ready": frappe.get_meta("Sales Invoice").has_field("his_encounter"),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def create_invoice(encounter: str, items):
+	"""ออกใบแจ้งหนี้จาก encounter — สร้าง Sales Invoice แล้ว submit
+
+	items: list[dict] — {item_code, qty, rate?} (rate ใช้เฉพาะเมื่อ price list ไม่มีราคา)
+	"""
+	from frappe.utils import cint  # noqa: F401  (คงรูปแบบ import ท้องถิ่นเหมือน endpoint อื่น)
+
+	items = frappe.parse_json(items) if isinstance(items, str) else items
+	if not items:
+		frappe.throw(_("ไม่มีรายการค่าใช้จ่าย"))
+
+	enc = frappe.get_doc("Patient Encounter", encounter)
+	enc.check_permission("read")
+	if enc.docstatus != 1:
+		frappe.throw(_("Encounter {0} ยังไม่จบการตรวจ").format(encounter))
+
+	si_meta = frappe.get_meta("Sales Invoice")
+	if not si_meta.has_field("his_encounter"):
+		frappe.throw(
+			_("ยังไม่มี custom field his_encounter บน Sales Invoice — รัน bench migrate ก่อน")
+		)
+
+	if _find_encounter_invoice(encounter):
+		frappe.throw(_("Encounter {0} ออกใบแจ้งหนี้ไปแล้ว").format(encounter))
+
+	patient = frappe.get_doc("Patient", enc.patient)
+	customer = patient.get("customer")
+	if not customer:
+		frappe.throw(
+			_(
+				"ผู้ป่วย {0} ยังไม่มี Customer — เปิด Healthcare Settings > Link Customer to Patient "
+				"แล้วบันทึก Patient ใหม่ หรือสร้าง Customer ผูกเอง"
+			).format(patient.name)
+		)
+
+	si = frappe.new_doc("Sales Invoice")
+	si.customer = customer
+	si.due_date = nowdate()
+	si.his_encounter = encounter
+	company = (
+		enc.get("company")
+		or frappe.defaults.get_user_default("Company")
+		or frappe.db.get_single_value("Global Defaults", "default_company")
+	)
+	if company:
+		si.company = company
+	if si_meta.has_field("patient"):
+		si.patient = patient.name
+	if si_meta.has_field("ref_practitioner") and enc.get("practitioner"):
+		si.ref_practitioner = enc.practitioner
+
+	fallback_rates: dict[str, float] = {}
+	for item in items:
+		if not item.get("item_code"):
+			continue
+		si.append("items", {"item_code": item["item_code"], "qty": flt(item.get("qty")) or 1})
+		if item.get("rate") is not None:
+			fallback_rates[item["item_code"]] = flt(item["rate"])
+
+	if not si.get("items"):
+		frappe.throw(_("ไม่มีรายการค่าใช้จ่าย"))
+
+	si.insert()  # ERPNext ดึงราคาจาก price list ให้ตอน validate
+
+	# ตัวไหน price list ไม่มีราคา (rate = 0) ใช้ rate ที่หน้าจอส่งมา (เช่น ค่าตรวจแพทย์)
+	changed = False
+	for row in si.items:
+		if not flt(row.rate) and fallback_rates.get(row.item_code):
+			row.rate = fallback_rates[row.item_code]
+			changed = True
+	if changed:
+		si.save()
+
+	si.submit()
+	return _invoice_summary(si.name)
+
+
+@frappe.whitelist(methods=["POST"])
+def record_payment(invoice: str, mode_of_payment: str | None = None):
+	"""รับชำระเงินเต็มยอดคงค้างของใบแจ้งหนี้ — สร้าง Payment Entry แล้ว submit"""
+	from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+	si = frappe.get_doc("Sales Invoice", invoice)
+	si.check_permission("read")
+	if si.docstatus != 1:
+		frappe.throw(_("ใบแจ้งหนี้ {0} ยังไม่ถูก submit").format(invoice))
+	if flt(si.outstanding_amount) <= 0:
+		frappe.throw(_("ใบแจ้งหนี้ {0} ชำระครบแล้ว").format(invoice))
+
+	pe = get_payment_entry("Sales Invoice", invoice)
+	if mode_of_payment:
+		pe.mode_of_payment = mode_of_payment
+		account = frappe.db.get_value(
+			"Mode of Payment Account",
+			{"parent": mode_of_payment, "company": pe.company},
+			"default_account",
+		)
+		if account:
+			pe.paid_to = account
+	pe.reference_no = invoice
+	pe.reference_date = nowdate()
+
+	pe.insert()
+	pe.submit()
+
+	return {
+		"payment_entry": pe.name,
+		"paid_amount": pe.paid_amount,
+		"invoice": _invoice_summary(invoice),
+	}

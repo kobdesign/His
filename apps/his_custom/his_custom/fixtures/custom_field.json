@@ -1,6 +1,24 @@
 [
  {
   "doctype": "Custom Field",
+  "name": "Sales Invoice-his_encounter",
+  "dt": "Sales Invoice",
+  "fieldname": "his_encounter",
+  "label": "Patient Encounter (HIS)",
+  "fieldtype": "Link",
+  "options": "Patient Encounter",
+  "insert_after": "customer",
+  "module": "HIS Custom",
+  "allow_on_submit": 0,
+  "hidden": 0,
+  "no_copy": 1,
+  "read_only": 1,
+  "reqd": 0,
+  "search_index": 1,
+  "translatable": 0
+ },
+ {
+  "doctype": "Custom Field",
   "name": "Vital Signs-oxygen_saturation",
   "dt": "Vital Signs",
   "fieldname": "oxygen_saturation",

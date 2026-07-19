@@ -42,6 +42,15 @@ export default function Home() {
             คิวจ่ายยาจากใบสั่งแพทย์ พร้อมตัดสต็อกคลังยา
           </p>
         </Link>
+        <Link
+          href="/billing"
+          className="rounded-lg border bg-white p-5 shadow-sm transition hover:border-teal-500 hover:shadow"
+        >
+          <h2 className="font-semibold text-teal-700">การเงิน</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            ออกใบแจ้งหนี้จากผลตรวจ และรับชำระเงินหน้าเคาน์เตอร์
+          </p>
+        </Link>
       </div>
     </div>
   );

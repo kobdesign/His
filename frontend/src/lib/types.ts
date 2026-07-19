@@ -121,6 +121,71 @@ export type DispenseRecord = {
   }[];
 };
 
+export type InvoiceSummary = {
+  name: string;
+  status: string;
+  grand_total: number;
+  outstanding_amount: number;
+  posting_date: string | null;
+  items: {
+    item_code: string;
+    item_name: string;
+    qty: number;
+    rate: number;
+    amount: number;
+  }[];
+};
+
+export type BillingQueueRow = {
+  name: string;
+  patient: string;
+  patient_name: string;
+  encounter_date: string;
+  encounter_time: string | null;
+  practitioner_name?: string | null;
+  medical_department?: string | null;
+  invoice: {
+    name: string;
+    grand_total: number;
+    outstanding_amount: number;
+    status: string;
+  } | null;
+};
+
+export type BillingQueueData = {
+  date: string;
+  encounters: BillingQueueRow[];
+  billing_ready: boolean;
+};
+
+export type ChargeLine = {
+  source: string;
+  item_code: string;
+  item_name: string | null;
+  qty: number;
+  rate_hint: number | null;
+};
+
+export type BillingContext = {
+  encounter: {
+    name: string;
+    encounter_date: string | null;
+    encounter_time: string | null;
+    practitioner_name: string | null;
+  };
+  patient: {
+    name: string;
+    patient_name: string;
+    sex: string | null;
+    age: string | null;
+    mobile: string | null;
+    customer_ok: boolean;
+  };
+  charges: ChargeLine[];
+  invoice: InvoiceSummary | null;
+  billing_ready: boolean;
+};
+
 export type DispenseContext = {
   encounter: {
     name: string;

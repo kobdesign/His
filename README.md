@@ -71,9 +71,9 @@ npm run dev
 Custom endpoint ตัวอย่างอยู่ที่ `apps/his_custom/his_custom/api.py`
 (`/api/method/his_custom.api.search_patients` ฯลฯ)
 
-## Roadmap (เสนอ)
+## Roadmap
 
-1. **Phase 1 — OPD นำร่อง**: ลงทะเบียน → คัดกรอง/vital signs → ตรวจ (Patient Encounter) → สั่งยา/แล็บ → จ่ายยา → ชำระเงิน
+1. **Phase 1 — OPD นำร่อง** ✅: คิว/เช็คอิน (`/queue`) → คัดกรอง vital signs → ห้องตรวจแพทย์ (`/exam`) → ห้องยา+ตัดสต็อก (`/pharmacy`) → ออกบิล/รับชำระ (`/billing`)
 2. **Phase 2 — IPD**: Admission / Transfer / Discharge, dashboard เตียง
 3. **Phase 3 — สิทธิการรักษา + เคลม**: UC / ประกันสังคม / ข้าราชการ, ส่งออก 16/43 แฟ้ม, E-Claim สปสช.
 4. **Phase 4 — Integration**: LIS เครื่องแล็บ, PACS (Orthanc/HL7/FHIR), ระบบคิว/จอเรียกคิว
