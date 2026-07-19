@@ -24,10 +24,15 @@ export default function Home() {
             คิววันนี้, เช็คอิน, บันทึกสัญญาณชีพ (Vital Signs)
           </p>
         </Link>
-        <div className="rounded-lg border border-dashed bg-white p-5 text-slate-400">
-          <h2 className="font-semibold">ห้องตรวจแพทย์</h2>
-          <p className="mt-1 text-sm">— ยังไม่ได้พัฒนา —</p>
-        </div>
+        <Link
+          href="/exam"
+          className="rounded-lg border bg-white p-5 shadow-sm transition hover:border-teal-500 hover:shadow"
+        >
+          <h2 className="font-semibold text-teal-700">ห้องตรวจแพทย์</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            บันทึกอาการ วินิจฉัย สั่งยา สั่งแล็บ (Patient Encounter)
+          </p>
+        </Link>
       </div>
     </div>
   );

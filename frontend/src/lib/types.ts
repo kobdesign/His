@@ -38,6 +38,7 @@ export type AppointmentDetail = {
     blood_group: string | null;
     mobile: string | null;
   };
+  encounter?: EncounterData | null;
   latest_vitals: {
     name: string;
     signs_date: string;
@@ -52,3 +53,25 @@ export type AppointmentDetail = {
     bmi: number | null;
   } | null;
 };
+
+export type DrugRow = {
+  drug: string | null;
+  drug_name?: string | null;
+  dosage: string | null;
+  period: string | null;
+  dosage_form: string | null;
+  comment: string | null;
+};
+
+export type EncounterData = {
+  name: string;
+  docstatus: 0 | 1 | 2;
+  symptoms: string[];
+  diagnosis: string[];
+  drugs: DrugRow[];
+  lab_tests: string[];
+  notes: string;
+};
+
+export type LinkOption = { value: string; label: string };
+

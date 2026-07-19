@@ -259,3 +259,283 @@ def submit_vital_signs(
 		"patient": doc.patient,
 		"appointment": doc.appointment,
 	}
+
+
+# ------------------------------------------------------------------
+# ห้องตรวจแพทย์ (Patient Encounter)
+# ------------------------------------------------------------------
+
+# แหล่งข้อมูล link search ของ frontend — map logical key -> (child doctype, link field)
+# อ่าน target doctype จาก meta จริงเสมอ เพราะ Frappe Health แต่ละรุ่น schema ไม่เท่ากัน
+LINK_SOURCES = {
+	"complaint": ("Patient Encounter Symptom", None),  # None = ใช้ Link field แรกของ child
+	"diagnosis": ("Patient Encounter Diagnosis", None),
+	"drug": ("Drug Prescription", "drug_code"),
+	"dosage": ("Drug Prescription", "dosage"),
+	"period": ("Drug Prescription", "period"),
+	"dosage_form": ("Drug Prescription", "dosage_form"),
+	"lab_test": ("Lab Prescription", "lab_test_code"),
+}
+
+
+def _link_target(child_dt: str, fieldname: str | None = None):
+	"""หา (fieldname, target doctype) ของ Link field ใน child doctype แบบกันรุ่นต่างกัน"""
+	if not frappe.db.exists("DocType", child_dt):
+		return (None, None)
+	meta = frappe.get_meta(child_dt)
+	field = meta.get_field(fieldname) if fieldname else None
+	if not field:
+		field = next((f for f in meta.fields if f.fieldtype == "Link"), None)
+	if not field or not field.options:
+		return (None, None)
+	return (field.fieldname, field.options)
+
+
+def _get_or_create_master(doctype: str, value: str) -> str | None:
+	"""คืนชื่อ master record — สร้างใหม่ให้ถ้า doctype ตั้งชื่อจาก field (เช่น Diagnosis, Complaint)"""
+	value = (value or "").strip()
+	if not value:
+		return None
+	if frappe.db.exists(doctype, value):
+		return value
+	autoname = frappe.get_meta(doctype).autoname or ""
+	if autoname.startswith("field:"):
+		doc = frappe.get_doc({"doctype": doctype, autoname.split(":", 1)[1]: value})
+		doc.insert()
+		return doc.name
+	frappe.throw(_("{0} '{1}' ไม่มีในระบบ — กรุณาเลือกจากรายการ").format(_(doctype), value))
+
+
+def _set_multiselect(doc, table_field: str, values, allow_create: bool = False):
+	"""แทนที่ child table แบบ multiselect (symptoms / diagnosis) ด้วยรายการใหม่"""
+	if values is None or not doc.meta.has_field(table_field):
+		return
+	child_dt = doc.meta.get_field(table_field).options
+	link_field, target = _link_target(child_dt)
+	if not link_field:
+		return
+	doc.set(table_field, [])
+	for value in values:
+		if allow_create:
+			name = _get_or_create_master(target, value)
+		else:
+			name = (value or "").strip() or None
+			if name and not frappe.db.exists(target, name):
+				frappe.throw(_("{0} '{1}' ไม่มีในระบบ").format(_(target), name))
+		if name:
+			doc.append(table_field, {link_field: name})
+
+
+def _encounter_to_dict(doc) -> dict:
+	drugs = []
+	if doc.meta.has_field("drug_prescription"):
+		for row in doc.get("drug_prescription"):
+			drugs.append(
+				{
+					"drug": row.get("drug_code") or row.get("medication"),
+					"drug_name": row.get("drug_name"),
+					"dosage": row.get("dosage"),
+					"period": row.get("period"),
+					"dosage_form": row.get("dosage_form"),
+					"comment": row.get("comment"),
+				}
+			)
+
+	lab_tests = []
+	if doc.meta.has_field("lab_test_prescription"):
+		link_field, _target = _link_target(
+			doc.meta.get_field("lab_test_prescription").options, "lab_test_code"
+		)
+		if link_field:
+			lab_tests = [
+				row.get(link_field) for row in doc.get("lab_test_prescription") if row.get(link_field)
+			]
+
+	def table_links(table_field):
+		if not doc.meta.has_field(table_field):
+			return []
+		link_field, _t = _link_target(doc.meta.get_field(table_field).options)
+		if not link_field:
+			return []
+		return [row.get(link_field) for row in doc.get(table_field) if row.get(link_field)]
+
+	notes = ""
+	for fieldname in ("encounter_comment", "notes"):
+		if doc.meta.has_field(fieldname):
+			notes = doc.get(fieldname) or ""
+			break
+
+	return {
+		"name": doc.name,
+		"docstatus": doc.docstatus,
+		"symptoms": table_links("symptoms"),
+		"diagnosis": table_links("diagnosis"),
+		"drugs": drugs,
+		"lab_tests": lab_tests,
+		"notes": notes,
+	}
+
+
+@frappe.whitelist()
+def search_link(key: str, query: str = "", limit: int = 10):
+	"""typeahead search สำหรับฟอร์มห้องตรวจ — จำกัดเฉพาะ doctype ใน LINK_SOURCES เท่านั้น"""
+	if key not in LINK_SOURCES:
+		frappe.throw(_("Unknown link key: {0}").format(key))
+
+	child_dt, fieldname = LINK_SOURCES[key]
+	_link_fieldname, target = _link_target(child_dt, fieldname)
+	if not target:
+		return {"doctype": None, "results": []}
+
+	meta = frappe.get_meta(target)
+	title_field = None
+	if meta.title_field and meta.title_field != "name" and meta.has_field(meta.title_field):
+		title_field = meta.title_field
+
+	fields = ["name"] + ([title_field] if title_field else [])
+	kwargs: dict = {
+		"fields": fields,
+		"limit_page_length": min(int(limit), 20),
+	}
+	if query:
+		or_filters = [[target, "name", "like", f"%{query}%"]]
+		if title_field:
+			or_filters.append([target, title_field, "like", f"%{query}%"])
+		kwargs["or_filters"] = or_filters
+
+	rows = frappe.get_list(target, **kwargs)
+	return {
+		"doctype": target,
+		"results": [
+			{"value": r["name"], "label": (r.get(title_field) if title_field else None) or r["name"]}
+			for r in rows
+		],
+	}
+
+
+@frappe.whitelist()
+def get_encounter_context(appointment: str):
+	"""ข้อมูลทั้งหมดที่หน้าห้องตรวจต้องใช้: นัด + ผู้ป่วย + vitals + encounter (ถ้ามี)"""
+	detail = get_appointment_detail(appointment)
+
+	names = frappe.get_all(
+		"Patient Encounter",
+		filters={"appointment": appointment, "docstatus": ["<", 2]},
+		order_by="docstatus desc, modified desc",  # ถ้ามีทั้ง submitted และ draft ให้ submitted ชนะ
+		pluck="name",
+		limit=1,
+	)
+	encounter = None
+	if names:
+		doc = frappe.get_doc("Patient Encounter", names[0])
+		doc.check_permission("read")
+		encounter = _encounter_to_dict(doc)
+
+	detail["encounter"] = encounter
+	return detail
+
+
+@frappe.whitelist(methods=["POST"])
+def save_encounter(
+	appointment: str,
+	symptoms=None,
+	diagnosis=None,
+	drugs=None,
+	lab_tests=None,
+	notes: str | None = None,
+	submit=0,
+):
+	"""บันทึก (ร่าง) หรือจบการตรวจ — สร้าง/แก้ Patient Encounter ของนัดหมายนี้
+
+	symptoms / diagnosis: list[str] — สร้าง master ใหม่ให้ถ้ายังไม่มี
+	drugs: list[dict] — {drug, dosage, period, dosage_form, comment}
+	lab_tests: list[str] — ชื่อ Lab Test Template
+	submit: 1 = submit เอกสารจบการตรวจ
+	"""
+	from frappe.utils import cint
+
+	symptoms = frappe.parse_json(symptoms) if isinstance(symptoms, str) else symptoms
+	diagnosis = frappe.parse_json(diagnosis) if isinstance(diagnosis, str) else diagnosis
+	drugs = frappe.parse_json(drugs) if isinstance(drugs, str) else drugs
+	lab_tests = frappe.parse_json(lab_tests) if isinstance(lab_tests, str) else lab_tests
+
+	appt = frappe.get_doc("Patient Appointment", appointment)
+	appt.check_permission("read")
+
+	if frappe.db.exists("Patient Encounter", {"appointment": appointment, "docstatus": 1}):
+		frappe.throw(_("นัดหมายนี้ตรวจเสร็จแล้ว — Patient Encounter ถูก submit ไปแล้ว"))
+
+	if not appt.practitioner:
+		frappe.throw(
+			_("นัดหมายนี้ยังไม่ได้ระบุแพทย์ (Practitioner) — กรุณาแก้ไขที่ Patient Appointment ก่อน")
+		)
+
+	existing = frappe.get_all(
+		"Patient Encounter",
+		filters={"appointment": appointment, "docstatus": 0},
+		pluck="name",
+		limit=1,
+	)
+	if existing:
+		doc = frappe.get_doc("Patient Encounter", existing[0])
+	else:
+		doc = frappe.new_doc("Patient Encounter")
+		doc.appointment = appointment
+		doc.patient = appt.patient
+		doc.practitioner = appt.practitioner
+		if doc.meta.has_field("medical_department") and appt.get("department"):
+			doc.medical_department = appt.department
+		if doc.meta.has_field("company") and appt.get("company"):
+			doc.company = appt.company
+
+	doc.encounter_date = nowdate()
+	doc.encounter_time = nowtime()
+
+	_set_multiselect(doc, "symptoms", symptoms, allow_create=True)
+	_set_multiselect(doc, "diagnosis", diagnosis, allow_create=True)
+
+	# ใบสั่งยา — field ต่างรุ่นต่างกัน จึงเซ็ตเฉพาะ field ที่มีจริงใน meta
+	if drugs is not None and doc.meta.has_field("drug_prescription"):
+		child_meta = frappe.get_meta(doc.meta.get_field("drug_prescription").options)
+		doc.set("drug_prescription", [])
+		for d in drugs or []:
+			row = {}
+			for src, fieldname in (
+				("drug", "drug_code"),
+				("dosage", "dosage"),
+				("period", "period"),
+				("dosage_form", "dosage_form"),
+				("comment", "comment"),
+			):
+				if d.get(src) and child_meta.has_field(fieldname):
+					row[fieldname] = d[src]
+			if (
+				d.get("drug")
+				and child_meta.has_field("medication")
+				and frappe.db.exists("Medication", d["drug"])
+			):
+				row["medication"] = d["drug"]
+			if row:
+				doc.append("drug_prescription", row)
+
+	# สั่งแล็บ
+	if lab_tests is not None and doc.meta.has_field("lab_test_prescription"):
+		link_field, target = _link_target(
+			doc.meta.get_field("lab_test_prescription").options, "lab_test_code"
+		)
+		doc.set("lab_test_prescription", [])
+		for t in lab_tests or []:
+			if link_field and t and frappe.db.exists(target, t):
+				doc.append("lab_test_prescription", {link_field: t})
+
+	if notes is not None:
+		for fieldname in ("encounter_comment", "notes"):
+			if doc.meta.has_field(fieldname):
+				doc.set(fieldname, notes)
+				break
+
+	doc.save()
+	if cint(submit):
+		doc.submit()
+
+	return _encounter_to_dict(doc)
