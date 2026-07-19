@@ -1,0 +1,62 @@
+# HIS Development Stack — Frappe Health (ERPNext for Healthcare)
+#
+# Pattern: "development bench in a container" (แบบเดียวกับ frappe_docker development setup)
+# ตัว bench อยู่ใน named volume ส่วน custom app (apps/his_custom) mount จาก repo นี้
+# เข้าไปให้ bench get-app ใช้ตรง ๆ — แก้โค้ดในเครื่องแล้วเห็นผลใน container ทันที
+#
+# วิธีใช้ (ครั้งแรก):
+#   docker compose up -d
+#   docker compose exec frappe bash /workspace/docker/init-bench.sh
+#   docker compose exec frappe bash -c "cd frappe-bench && bench start"
+#
+# แล้วเปิด http://localhost:8000  (site: his.localhost, user: Administrator, pass: admin)
+# ดูรายละเอียดเพิ่มใน README.md
+
+services:
+  mariadb:
+    image: mariadb:10.6
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --skip-innodb-read-only-compressed
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-admin}
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 20
+
+  redis-cache:
+    image: redis:7-alpine
+
+  redis-queue:
+    image: redis:7-alpine
+
+  frappe:
+    image: frappe/bench:latest
+    command: sleep infinity
+    working_dir: /home/frappe
+    environment:
+      - SHELL=/bin/bash
+    volumes:
+      - frappe-bench:/home/frappe/frappe-bench
+      - .:/workspace
+    ports:
+      # bench serve (Werkzeug dev server)
+      - "8000:8000"
+      # socketio (realtime)
+      - "9000:9000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
+      redis-queue:
+        condition: service_started
+
+volumes:
+  mariadb-data:
+  frappe-bench:
