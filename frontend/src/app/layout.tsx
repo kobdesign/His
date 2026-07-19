@@ -18,6 +18,9 @@ export default function RootLayout({
             <Link href="/" className="text-lg font-semibold text-teal-700">
               HIS
             </Link>
+            <Link href="/queue" className="text-sm text-slate-600 hover:text-teal-700">
+              คิว OPD
+            </Link>
             <Link href="/patients" className="text-sm text-slate-600 hover:text-teal-700">
               ผู้ป่วย
             </Link>

@@ -1,0 +1,18 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "Vital Signs-oxygen_saturation",
+  "dt": "Vital Signs",
+  "fieldname": "oxygen_saturation",
+  "label": "Oxygen Saturation (SpO2 %)",
+  "fieldtype": "Float",
+  "precision": "1",
+  "insert_after": "respiratory_rate",
+  "module": "HIS Custom",
+  "allow_on_submit": 0,
+  "hidden": 0,
+  "read_only": 0,
+  "reqd": 0,
+  "translatable": 0
+ }
+]

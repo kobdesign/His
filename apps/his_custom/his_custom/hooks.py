@@ -12,11 +12,11 @@ required_apps = ["erpnext", "healthcare"]
 # จุดต่อขยายที่ใช้บ่อย — เปิดคอมเมนต์เมื่อเริ่มใช้จริง
 # ------------------------------------------------------------------
 
-# Fixtures: เก็บ Custom Field / Property Setter / Translation ลง git
-# fixtures = [
-# 	{"dt": "Custom Field", "filters": [["module", "=", "HIS Custom"]]},
-# 	{"dt": "Property Setter", "filters": [["module", "=", "HIS Custom"]]},
-# ]
+# Fixtures: เก็บ Custom Field / Property Setter ลง git (import อัตโนมัติตอน migrate)
+fixtures = [
+	{"dt": "Custom Field", "filters": [["module", "=", "HIS Custom"]]},
+	{"dt": "Property Setter", "filters": [["module", "=", "HIS Custom"]]},
+]
 
 # Document Events: hook ลอจิกเพิ่มเข้ากับ DocType ของ Frappe Health
 # doc_events = {

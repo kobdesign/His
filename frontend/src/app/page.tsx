@@ -15,10 +15,15 @@ export default function Home() {
           <h2 className="font-semibold text-teal-700">เวชระเบียน</h2>
           <p className="mt-1 text-sm text-slate-500">ค้นหาและดูรายชื่อผู้ป่วย (Patient)</p>
         </Link>
-        <div className="rounded-lg border border-dashed bg-white p-5 text-slate-400">
-          <h2 className="font-semibold">นัดหมาย / คิว OPD</h2>
-          <p className="mt-1 text-sm">— ยังไม่ได้พัฒนา —</p>
-        </div>
+        <Link
+          href="/queue"
+          className="rounded-lg border bg-white p-5 shadow-sm transition hover:border-teal-500 hover:shadow"
+        >
+          <h2 className="font-semibold text-teal-700">คิว OPD / คัดกรอง</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            คิววันนี้, เช็คอิน, บันทึกสัญญาณชีพ (Vital Signs)
+          </p>
+        </Link>
         <div className="rounded-lg border border-dashed bg-white p-5 text-slate-400">
           <h2 className="font-semibold">ห้องตรวจแพทย์</h2>
           <p className="mt-1 text-sm">— ยังไม่ได้พัฒนา —</p>

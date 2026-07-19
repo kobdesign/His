@@ -84,3 +84,16 @@ export async function callMethod<T = unknown>(
   );
   return data.message;
 }
+
+/** เรียก whitelisted method แบบเขียนข้อมูล: POST /api/method/<dotted.path>
+ *  (token auth ของ Frappe ข้าม CSRF check ให้อยู่แล้ว) */
+export async function callMethodPost<T = unknown>(
+  method: string,
+  body: Record<string, unknown> = {},
+): Promise<T> {
+  const data = await frappeFetch<{ message: T }>(`/api/method/${method}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return data.message;
+}
