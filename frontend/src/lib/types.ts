@@ -75,3 +75,67 @@ export type EncounterData = {
 
 export type LinkOption = { value: string; label: string };
 
+export type PharmacyQueueRow = {
+  name: string;
+  patient: string;
+  patient_name: string;
+  encounter_date: string;
+  encounter_time: string | null;
+  practitioner_name?: string | null;
+  medical_department?: string | null;
+  drug_count: number;
+  dispensed: boolean;
+  dispense_name: string | null;
+};
+
+export type PharmacyQueueData = {
+  date: string;
+  encounters: PharmacyQueueRow[];
+};
+
+export type PrescriptionLine = {
+  drug: string | null;
+  drug_name: string | null;
+  dosage: string | null;
+  period: string | null;
+  comment: string | null;
+  item_code: string | null;
+  item_name: string | null;
+  stock_uom: string | null;
+};
+
+export type DispenseRecord = {
+  name: string;
+  warehouse: string | null;
+  update_stock: 0 | 1;
+  stock_entry: string | null;
+  posting_date: string | null;
+  items: {
+    drug: string | null;
+    item_code: string | null;
+    item_name: string | null;
+    qty: number;
+    uom: string | null;
+    dosage: string | null;
+    instructions: string | null;
+  }[];
+};
+
+export type DispenseContext = {
+  encounter: {
+    name: string;
+    encounter_date: string | null;
+    encounter_time: string | null;
+    practitioner_name: string | null;
+  };
+  patient: {
+    name: string;
+    patient_name: string;
+    sex: string | null;
+    age: string | null;
+    mobile: string | null;
+  };
+  prescriptions: PrescriptionLine[];
+  dispense: DispenseRecord | null;
+};
+

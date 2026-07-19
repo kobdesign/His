@@ -33,6 +33,15 @@ export default function Home() {
             บันทึกอาการ วินิจฉัย สั่งยา สั่งแล็บ (Patient Encounter)
           </p>
         </Link>
+        <Link
+          href="/pharmacy"
+          className="rounded-lg border bg-white p-5 shadow-sm transition hover:border-teal-500 hover:shadow"
+        >
+          <h2 className="font-semibold text-teal-700">ห้องยา</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            คิวจ่ายยาจากใบสั่งแพทย์ พร้อมตัดสต็อกคลังยา
+          </p>
+        </Link>
       </div>
     </div>
   );

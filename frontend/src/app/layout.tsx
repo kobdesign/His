@@ -24,6 +24,9 @@ export default function RootLayout({
             <Link href="/exam" className="text-sm text-slate-600 hover:text-teal-700">
               ห้องตรวจ
             </Link>
+            <Link href="/pharmacy" className="text-sm text-slate-600 hover:text-teal-700">
+              ห้องยา
+            </Link>
             <Link href="/patients" className="text-sm text-slate-600 hover:text-teal-700">
               ผู้ป่วย
             </Link>

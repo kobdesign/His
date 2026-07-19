@@ -275,6 +275,8 @@ LINK_SOURCES = {
 	"period": ("Drug Prescription", "period"),
 	"dosage_form": ("Drug Prescription", "dosage_form"),
 	"lab_test": ("Lab Prescription", "lab_test_code"),
+	"warehouse": ("Pharmacy Dispense", "warehouse"),
+	"item": ("Pharmacy Dispense Item", "item_code"),
 }
 
 
@@ -539,3 +541,224 @@ def save_encounter(
 		doc.submit()
 
 	return _encounter_to_dict(doc)
+
+
+# ------------------------------------------------------------------
+# ห้องยา (Pharmacy Dispense)
+# ------------------------------------------------------------------
+
+
+def _resolve_drug_item(drug: str | None) -> dict | None:
+	"""แปลงค่า drug จากใบสั่งยาให้เป็น Item สำหรับตัดสต็อก
+
+	drug_code ใน Drug Prescription อาจ link ไป Item ตรง ๆ (schema เก่า)
+	หรือ Medication (Frappe Health รุ่นใหม่) — ถ้าเป็น Medication
+	ให้ตามหา Item ที่ผูกไว้ใน field/child table ของมัน
+	"""
+	if not drug:
+		return None
+
+	item = None
+	if frappe.db.exists("Item", drug):
+		item = drug
+	elif frappe.db.exists("DocType", "Medication") and frappe.db.exists("Medication", drug):
+		med_meta = frappe.get_meta("Medication")
+		med = frappe.get_doc("Medication", drug)
+		for fieldname in ("item", "item_code"):
+			if med_meta.has_field(fieldname) and med.get(fieldname):
+				item = med.get(fieldname)
+				break
+		if not item:
+			# หา child table แรกที่มี Link -> Item (เช่น linked_items)
+			for table_field in med_meta.fields:
+				if table_field.fieldtype != "Table":
+					continue
+				child_meta = frappe.get_meta(table_field.options)
+				link = next(
+					(f.fieldname for f in child_meta.fields if f.fieldtype == "Link" and f.options == "Item"),
+					None,
+				)
+				rows = med.get(table_field.fieldname) if link else None
+				if link and rows:
+					item = rows[0].get(link)
+					break
+
+	if not item:
+		return None
+
+	item_name, stock_uom = frappe.db.get_value("Item", item, ["item_name", "stock_uom"])
+	return {"item_code": item, "item_name": item_name, "stock_uom": stock_uom}
+
+
+@frappe.whitelist()
+def get_pharmacy_queue(date: str | None = None):
+	"""คิวห้องยา — encounter ที่ submit แล้วของวัน เฉพาะที่มีใบสั่งยา พร้อมสถานะจ่ายยา"""
+	date = date or nowdate()
+
+	enc_meta = frappe.get_meta("Patient Encounter")
+	fields = ["name", "patient", "patient_name", "encounter_date", "encounter_time"]
+	for optional in ("practitioner_name", "medical_department"):
+		if enc_meta.has_field(optional):
+			fields.append(optional)
+
+	encounters = frappe.get_list(
+		"Patient Encounter",
+		filters={"encounter_date": date, "docstatus": 1},
+		fields=fields,
+		order_by="encounter_time asc",
+		limit_page_length=0,
+	)
+	if not encounters:
+		return {"date": str(date), "encounters": []}
+
+	names = [e.name for e in encounters]
+
+	# นับรายการยาต่อ encounter — เอาเฉพาะที่มีใบสั่งยา
+	drug_counts = {
+		r.parent: r.drug_count
+		for r in frappe.get_all(
+			"Drug Prescription",
+			filters={"parent": ["in", names], "parenttype": "Patient Encounter"},
+			fields=["parent", "count(name) as drug_count"],
+			group_by="parent",
+		)
+	}
+
+	dispenses = {
+		d.encounter: d.name
+		for d in frappe.get_all(
+			"Pharmacy Dispense",
+			filters={"encounter": ["in", names], "docstatus": 1},
+			fields=["encounter", "name"],
+		)
+	}
+
+	rows = []
+	for e in encounters:
+		if not drug_counts.get(e.name):
+			continue
+		e["drug_count"] = drug_counts[e.name]
+		e["dispensed"] = e.name in dispenses
+		e["dispense_name"] = dispenses.get(e.name)
+		rows.append(e)
+
+	return {"date": str(date), "encounters": rows}
+
+
+@frappe.whitelist()
+def get_dispense_context(encounter: str):
+	"""ข้อมูลหน้าจ่ายยา: encounter + ผู้ป่วย + ใบสั่งยาที่ resolve เป็น Item + dispense เดิม (ถ้ามี)"""
+	doc = frappe.get_doc("Patient Encounter", encounter)
+	doc.check_permission("read")
+	if doc.docstatus != 1:
+		frappe.throw(_("Encounter {0} ยังไม่จบการตรวจ (ยังไม่ submit)").format(encounter))
+
+	patient = frappe.get_doc("Patient", doc.patient)
+
+	prescriptions = []
+	if doc.meta.has_field("drug_prescription"):
+		for row in doc.get("drug_prescription"):
+			drug = row.get("drug_code") or row.get("medication")
+			resolved = _resolve_drug_item(drug)
+			prescriptions.append(
+				{
+					"drug": drug,
+					"drug_name": row.get("drug_name"),
+					"dosage": row.get("dosage"),
+					"period": row.get("period"),
+					"comment": row.get("comment"),
+					"item_code": resolved["item_code"] if resolved else None,
+					"item_name": resolved["item_name"] if resolved else None,
+					"stock_uom": resolved["stock_uom"] if resolved else None,
+				}
+			)
+
+	dispense = None
+	names = frappe.get_all(
+		"Pharmacy Dispense",
+		filters={"encounter": encounter, "docstatus": 1},
+		pluck="name",
+		limit=1,
+	)
+	if names:
+		d = frappe.get_doc("Pharmacy Dispense", names[0])
+		dispense = {
+			"name": d.name,
+			"warehouse": d.warehouse,
+			"update_stock": d.update_stock,
+			"stock_entry": d.stock_entry,
+			"posting_date": str(d.posting_date) if d.posting_date else None,
+			"items": [
+				{
+					"drug": r.drug,
+					"item_code": r.item_code,
+					"item_name": r.item_name,
+					"qty": r.qty,
+					"uom": r.uom,
+					"dosage": r.dosage,
+					"instructions": r.instructions,
+				}
+				for r in d.items
+			],
+		}
+
+	return {
+		"encounter": {
+			"name": doc.name,
+			"encounter_date": str(doc.encounter_date) if doc.encounter_date else None,
+			"encounter_time": str(doc.encounter_time) if doc.encounter_time else None,
+			"practitioner_name": doc.get("practitioner_name"),
+		},
+		"patient": {
+			"name": patient.name,
+			"patient_name": patient.patient_name,
+			"sex": patient.sex,
+			"age": _age_text(patient.dob),
+			"mobile": patient.mobile,
+		},
+		"prescriptions": prescriptions,
+		"dispense": dispense,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def submit_dispense(encounter: str, items, warehouse: str | None = None, update_stock=1):
+	"""จ่ายยา — สร้าง Pharmacy Dispense แล้ว submit (ตัดสต็อกตาม update_stock)
+
+	items: list[dict] — {drug, item_code, qty, uom, dosage, period, instructions}
+	"""
+	from frappe.utils import cint
+
+	items = frappe.parse_json(items) if isinstance(items, str) else items
+	if not items:
+		frappe.throw(_("ไม่มีรายการยาให้จ่าย"))
+
+	enc = frappe.get_doc("Patient Encounter", encounter)
+	enc.check_permission("read")
+	if enc.docstatus != 1:
+		frappe.throw(_("Encounter {0} ยังไม่จบการตรวจ").format(encounter))
+
+	doc = frappe.new_doc("Pharmacy Dispense")
+	doc.encounter = encounter
+	doc.patient = enc.patient
+	doc.appointment = enc.get("appointment")
+	doc.warehouse = warehouse
+	doc.update_stock = cint(update_stock)
+	for item in items:
+		doc.append(
+			"items",
+			{
+				"drug": item.get("drug"),
+				"item_code": item.get("item_code"),
+				"qty": flt(item.get("qty")) or 1,
+				"uom": item.get("uom"),
+				"dosage": item.get("dosage"),
+				"period": item.get("period"),
+				"instructions": item.get("instructions"),
+			},
+		)
+
+	doc.insert()
+	doc.submit()
+
+	return {"name": doc.name, "stock_entry": doc.stock_entry}
