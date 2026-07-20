@@ -4,9 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BillingContext } from "@/lib/types";
 import SearchSelect from "@/components/SearchSelect";
-
-const fmtMoney = (n: number) =>
-  n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { fmtMoney } from "@/lib/format";
 
 type ChargeRow = {
   include: boolean;

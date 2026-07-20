@@ -3,13 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { PharmacyQueueData } from "@/lib/types";
+import { fmtTime } from "@/lib/format";
+import { sortPharmacyQueue } from "@/lib/worklist";
 
 const REFRESH_INTERVAL_MS = 20_000;
-
-function fmtTime(t: string | null): string {
-  if (!t) return "-";
-  return t.split(".")[0].slice(0, 5);
-}
 
 /** คิวห้องยา — เรียง "รอจ่ายยา" ขึ้นก่อน "จ่ายแล้ว" */
 export default function PharmacyWorklist({ initial }: { initial: PharmacyQueueData }) {
@@ -32,9 +29,9 @@ export default function PharmacyWorklist({ initial }: { initial: PharmacyQueueDa
     return () => clearInterval(timer);
   }, [refresh]);
 
-  const pending = data.encounters.filter((e) => !e.dispensed);
-  const done = data.encounters.filter((e) => e.dispensed);
-  const ordered = [...pending, ...done];
+  const pendingCount = data.encounters.filter((e) => !e.dispensed).length;
+  const doneCount = data.encounters.filter((e) => e.dispensed).length;
+  const ordered = sortPharmacyQueue(data.encounters);
 
   return (
     <div className="space-y-5">
@@ -42,7 +39,7 @@ export default function PharmacyWorklist({ initial }: { initial: PharmacyQueueDa
         <div>
           <h1 className="text-xl font-bold">ห้องยา — คิวจ่ายยาวันนี้</h1>
           <p className="text-sm text-slate-500">
-            {data.date} · รอจ่ายยา {pending.length} ราย · จ่ายแล้ว {done.length} ราย ·
+            {data.date} · รอจ่ายยา {pendingCount} ราย · จ่ายแล้ว {doneCount} ราย ·
             รีเฟรชอัตโนมัติทุก {REFRESH_INTERVAL_MS / 1000} วินาที
           </p>
         </div>

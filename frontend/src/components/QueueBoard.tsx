@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { QueueData } from "@/lib/types";
+import { fmtTime } from "@/lib/format";
 
 const REFRESH_INTERVAL_MS = 20_000;
 
@@ -27,11 +28,6 @@ const STATUS_LABEL: Record<string, string> = {
   "No Show": "ไม่มาตามนัด",
   Cancelled: "ยกเลิก",
 };
-
-function fmtTime(t: string | null): string {
-  if (!t) return "-";
-  return t.split(".")[0].slice(0, 5); // "09:30:00" -> "09:30"
-}
 
 export default function QueueBoard({ initial }: { initial: QueueData }) {
   const [data, setData] = useState<QueueData>(initial);

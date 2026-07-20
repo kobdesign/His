@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { calcBMI } from "@/lib/format";
 
 type Props = {
   patient: string;
@@ -36,12 +37,10 @@ export default function VitalSignsForm({ patient, appointment, defaultHeightM }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const bmi = useMemo(() => {
-    const h = parseFloat(values.height_cm) / 100;
-    const w = parseFloat(values.weight);
-    if (!h || !w || h <= 0) return null;
-    return (w / (h * h)).toFixed(1);
-  }, [values.height_cm, values.weight]);
+  const bmi = useMemo(
+    () => calcBMI(parseFloat(values.height_cm), parseFloat(values.weight)),
+    [values.height_cm, values.weight],
+  );
 
   function set(field: string, v: string) {
     setValues((prev) => ({ ...prev, [field]: v }));

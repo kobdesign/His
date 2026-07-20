@@ -2,24 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { BillingQueueData, BillingQueueRow } from "@/lib/types";
+import type { BillingQueueData } from "@/lib/types";
+import { fmtMoney, fmtTime } from "@/lib/format";
+import { billState, sortByBillState } from "@/lib/billing";
 
 const REFRESH_INTERVAL_MS = 20_000;
-
-function fmtTime(t: string | null): string {
-  if (!t) return "-";
-  return t.split(".")[0].slice(0, 5);
-}
-
-const fmtMoney = (n: number) =>
-  n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-type BillState = "unbilled" | "unpaid" | "paid";
-
-function billState(row: BillingQueueRow): BillState {
-  if (!row.invoice) return "unbilled";
-  return row.invoice.outstanding_amount > 0 ? "unpaid" : "paid";
-}
 
 /** คิวการเงิน — เรียง รอออกบิล → ค้างชำระ → ชำระแล้ว */
 export default function BillingWorklist({ initial }: { initial: BillingQueueData }) {
@@ -42,8 +29,7 @@ export default function BillingWorklist({ initial }: { initial: BillingQueueData
     return () => clearInterval(timer);
   }, [refresh]);
 
-  const order: Record<BillState, number> = { unbilled: 0, unpaid: 1, paid: 2 };
-  const rows = [...data.encounters].sort((a, b) => order[billState(a)] - order[billState(b)]);
+  const rows = sortByBillState(data.encounters);
   const unbilled = rows.filter((r) => billState(r) === "unbilled").length;
   const unpaid = rows.filter((r) => billState(r) === "unpaid").length;
 

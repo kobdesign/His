@@ -3,13 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { QueueData } from "@/lib/types";
+import { fmtTime } from "@/lib/format";
+import { examReadiness, sortExamWorklist } from "@/lib/worklist";
 
 const REFRESH_INTERVAL_MS = 20_000;
-
-function fmtTime(t: string | null): string {
-  if (!t) return "-";
-  return t.split(".")[0].slice(0, 5);
-}
 
 /** worklist ห้องตรวจแพทย์ — เรียงให้คนที่คัดกรองแล้วและยังไม่ตรวจขึ้นก่อน */
 export default function ExamWorklist({ initial }: { initial: QueueData }) {
@@ -32,11 +29,8 @@ export default function ExamWorklist({ initial }: { initial: QueueData }) {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  const done = (s: string) => s === "Closed" || s === "Checked Out";
-  const ready = data.appointments.filter((a) => a.has_vitals && !done(a.status));
-  const waiting = data.appointments.filter((a) => !a.has_vitals && !done(a.status));
-  const finished = data.appointments.filter((a) => done(a.status));
-  const ordered = [...ready, ...waiting, ...finished];
+  const ordered = sortExamWorklist(data.appointments);
+  const readyCount = data.appointments.filter((a) => examReadiness(a) === "ready").length;
 
   return (
     <div className="space-y-5">
@@ -44,7 +38,7 @@ export default function ExamWorklist({ initial }: { initial: QueueData }) {
         <div>
           <h1 className="text-xl font-bold">ห้องตรวจแพทย์ — คิววันนี้</h1>
           <p className="text-sm text-slate-500">
-            {data.date} · พร้อมตรวจ (คัดกรองแล้ว) {ready.length} ราย · รีเฟรชอัตโนมัติทุก{" "}
+            {data.date} · พร้อมตรวจ (คัดกรองแล้ว) {readyCount} ราย · รีเฟรชอัตโนมัติทุก{" "}
             {REFRESH_INTERVAL_MS / 1000} วินาที
           </p>
         </div>
@@ -87,11 +81,11 @@ export default function ExamWorklist({ initial }: { initial: QueueData }) {
                   <td className="px-4 py-2">{a.department ?? "-"}</td>
                   <td className="px-4 py-2">{a.practitioner_name ?? "-"}</td>
                   <td className="px-4 py-2">
-                    {done(a.status) ? (
+                    {examReadiness(a) === "finished" ? (
                       <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
                         เสร็จสิ้น
                       </span>
-                    ) : a.has_vitals ? (
+                    ) : examReadiness(a) === "ready" ? (
                       <span className="inline-block rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
                         พร้อมตรวจ
                       </span>
@@ -104,11 +98,11 @@ export default function ExamWorklist({ initial }: { initial: QueueData }) {
                   <td className="px-4 py-2 text-right">
                     <Link href={`/exam/${encodeURIComponent(a.name)}`}
                       className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                        done(a.status)
+                        examReadiness(a) === "finished"
                           ? "border border-slate-300 text-slate-600 hover:bg-slate-50"
                           : "bg-teal-600 text-white hover:bg-teal-700"
                       }`}>
-                      {done(a.status) ? "ดูผลตรวจ" : "เปิดตรวจ"}
+                      {examReadiness(a) === "finished" ? "ดูผลตรวจ" : "เปิดตรวจ"}
                     </Link>
                   </td>
                 </tr>
